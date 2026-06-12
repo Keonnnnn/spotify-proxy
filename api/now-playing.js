@@ -3,6 +3,7 @@
 
 const TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const NOW_PLAYING_URL = 'https://api.spotify.com/v1/me/player/currently-playing';
+const RECENTLY_PLAYED_URL = 'https://api.spotify.com/v1/me/player/recently-played?limit=1';
 
 const {
   SPOTIFY_CLIENT_ID,
@@ -75,8 +76,33 @@ export default async function handler(req, res) {
       headers: { Authorization: `Bearer ${access_token}` },
     });
 
-    // 204 = nothing playing; >=400 = error from Spotify
+    // 204 = no active player — fall back to recently played
     if (nowRes.status === 204 || nowRes.status >= 400) {
+      try {
+        const recentRes = await fetch(RECENTLY_PLAYED_URL, {
+          headers: { Authorization: `Bearer ${access_token}` },
+        });
+        if (recentRes.ok) {
+          const recentData = await recentRes.json();
+          const track = recentData?.items?.[0]?.track;
+          if (track) {
+            const artists = Array.isArray(track.artists)
+              ? track.artists.map(a => a?.name).filter(Boolean)
+              : [];
+            return res.status(200).json({
+              isPlaying: false,
+              lastPlayed: true,
+              title: track.name || '',
+              artist: artists.join(', '),
+              album: track.album?.name || '',
+              artwork: track.album?.images?.[0]?.url || '',
+              url: track.external_urls?.spotify || '',
+              progressMs: 0,
+              durationMs: Number.isFinite(track.duration_ms) ? track.duration_ms : 0,
+            });
+          }
+        }
+      } catch (_) { /* fall through */ }
       return res.status(200).json({ isPlaying: false });
     }
 
